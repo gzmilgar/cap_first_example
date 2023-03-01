@@ -1,0 +1,5 @@
+@EndUserText.label: 'Service definition Header'
+define service ZUI_RAP_GILGAR_Header {
+  expose ZC_GILGAR_T_HEADER as Header;
+  expose ZC_GILGAR_T_ITEM as Item;
+}
