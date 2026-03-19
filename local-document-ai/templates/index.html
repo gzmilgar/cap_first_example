@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local Document AI Service</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f6fa; color: #333; }
+        .header { background: linear-gradient(135deg, #0a6ed1, #0854a0); color: white; padding: 24px 32px; }
+        .header h1 { font-size: 24px; font-weight: 600; }
+        .header p { opacity: 0.85; margin-top: 4px; font-size: 14px; }
+        .container { max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        .card { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 24px; margin-bottom: 20px; }
+        .card h2 { font-size: 18px; margin-bottom: 16px; color: #0a6ed1; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-weight: 500; margin-bottom: 6px; font-size: 14px; }
+        select, input[type="file"] { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+        .drop-zone { border: 2px dashed #ccc; border-radius: 8px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.2s; }
+        .drop-zone:hover, .drop-zone.dragover { border-color: #0a6ed1; background: #f0f7ff; }
+        .drop-zone p { color: #666; }
+        .drop-zone .icon { font-size: 48px; margin-bottom: 12px; }
+        .btn { display: inline-block; padding: 12px 24px; background: #0a6ed1; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.2s; }
+        .btn:hover { background: #0854a0; }
+        .btn:disabled { background: #ccc; cursor: not-allowed; }
+        .btn-secondary { background: #6c757d; }
+        .result-section { display: none; }
+        .result-section.visible { display: block; }
+        .json-output { background: #1e1e1e; color: #d4d4d4; padding: 16px; border-radius: 6px; overflow-x: auto; font-family: 'Consolas', 'Monaco', monospace; font-size: 13px; max-height: 600px; overflow-y: auto; white-space: pre-wrap; }
+        .field-table { width: 100%; border-collapse: collapse; }
+        .field-table th, .field-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 14px; }
+        .field-table th { background: #f8f9fa; font-weight: 600; color: #555; }
+        .field-table td:first-child { font-weight: 500; color: #0a6ed1; width: 200px; }
+        .confidence { display: inline-block; padding: 4px 12px; border-radius: 12px; font-weight: 500; font-size: 13px; }
+        .confidence.high { background: #e6f4ea; color: #1e7e34; }
+        .confidence.medium { background: #fff3cd; color: #856404; }
+        .confidence.low { background: #f8d7da; color: #721c24; }
+        .tabs { display: flex; border-bottom: 2px solid #eee; margin-bottom: 16px; }
+        .tab { padding: 10px 20px; cursor: pointer; font-weight: 500; color: #666; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+        .tab.active { color: #0a6ed1; border-bottom-color: #0a6ed1; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .spinner { display: none; border: 3px solid #f3f3f3; border-top: 3px solid #0a6ed1; border-radius: 50%; width: 24px; height: 24px; animation: spin 0.8s linear infinite; margin: 0 auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .status { padding: 12px; border-radius: 4px; margin-bottom: 16px; font-size: 14px; }
+        .status.success { background: #e6f4ea; color: #1e7e34; }
+        .status.error { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Local Document AI Service</h1>
+        <p>SAP Document AI uyumlu yerel belge bilgi cikarma servisi</p>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <h2>Belge Yukle / Upload Document</h2>
+            <form id="uploadForm">
+                <div class="form-group">
+                    <label>Belge Tipi / Document Type</label>
+                    <select id="docType">
+                        <option value="invoice">Fatura / Invoice</option>
+                        <option value="purchaseOrder">Satinalma Siparisi / Purchase Order</option>
+                        <option value="paymentAdvice">Odeme Bildirimi / Payment Advice</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <div class="drop-zone" id="dropZone">
+                        <div class="icon">&#128196;</div>
+                        <p>Dosyayi surukle birak veya tikla</p>
+                        <p style="font-size:12px; margin-top:8px; color:#999;">PDF, PNG, JPG, TIFF desteklenir</p>
+                        <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg,.tiff,.bmp" style="display:none;">
+                    </div>
+                    <p id="fileName" style="margin-top:8px; font-size:13px; color:#666;"></p>
+                </div>
+                <button type="submit" class="btn" id="extractBtn" disabled>Bilgi Cikar / Extract</button>
+                <div class="spinner" id="spinner"></div>
+            </form>
+        </div>
+
+        <div class="result-section" id="resultSection">
+            <div class="card">
+                <div id="statusBar"></div>
+                <div class="tabs">
+                    <div class="tab active" data-tab="structured">Yapisal Veri</div>
+                    <div class="tab" data-tab="items">Kalem Detaylari</div>
+                    <div class="tab" data-tab="json">JSON Cikti</div>
+                    <div class="tab" data-tab="rawtext">Ham Metin</div>
+                </div>
+
+                <div class="tab-content active" id="tab-structured">
+                    <table class="field-table" id="headerTable">
+                        <thead><tr><th>Alan / Field</th><th>Deger / Value</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+
+                <div class="tab-content" id="tab-items">
+                    <table class="field-table" id="itemsTable">
+                        <thead><tr id="itemsHeader"></tr></thead>
+                        <tbody id="itemsBody"></tbody>
+                    </table>
+                    <p id="noItems" style="color:#666; font-style:italic;">Kalem verisi bulunamadi.</p>
+                </div>
+
+                <div class="tab-content" id="tab-json">
+                    <pre class="json-output" id="jsonOutput"></pre>
+                </div>
+
+                <div class="tab-content" id="tab-rawtext">
+                    <pre class="json-output" id="rawTextOutput"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const extractBtn = document.getElementById('extractBtn');
+        const spinner = document.getElementById('spinner');
+        let selectedFile = null;
+
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+        dropZone.addEventListener('drop', e => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+        });
+        fileInput.addEventListener('change', e => { if (e.target.files.length) handleFile(e.target.files[0]); });
+
+        function handleFile(file) {
+            selectedFile = file;
+            document.getElementById('fileName').textContent = `Secilen: ${file.name} (${(file.size/1024).toFixed(1)} KB)`;
+            extractBtn.disabled = false;
+        }
+
+        // Tabs
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+            });
+        });
+
+        // Field name translations
+        const fieldLabels = {
+            documentType: 'Belge Tipi',
+            invoiceNumber: 'Fatura No',
+            invoiceDate: 'Fatura Tarihi',
+            dueDate: 'Vade Tarihi',
+            vendorName: 'Satici',
+            vendorTaxId: 'Satici VKN',
+            customerName: 'Musteri',
+            customerTaxId: 'Musteri VKN',
+            currency: 'Para Birimi',
+            subtotal: 'Ara Toplam',
+            taxAmount: 'KDV Tutari',
+            taxRate: 'KDV Orani',
+            totalAmount: 'Genel Toplam',
+            poNumber: 'Siparis No',
+            poDate: 'Siparis Tarihi',
+            deliveryDate: 'Teslimat Tarihi',
+            buyerName: 'Alici',
+            supplierName: 'Tedarikci',
+            shipToAddress: 'Sevk Adresi',
+            paymentTerms: 'Odeme Kosullari',
+            paymentAdviceNumber: 'Odeme Bildirimi No',
+            paymentDate: 'Odeme Tarihi',
+            payerName: 'Odeyen',
+            payeeName: 'Alici',
+            bankName: 'Banka',
+            iban: 'IBAN',
+            paymentMethod: 'Odeme Yontemi',
+        };
+
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!selectedFile) return;
+
+            extractBtn.disabled = true;
+            spinner.style.display = 'block';
+            document.getElementById('resultSection').classList.remove('visible');
+
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+            formData.append('documentType', document.getElementById('docType').value);
+
+            try {
+                const res = await fetch('/api/v1/document/extract', { method: 'POST', body: formData });
+                const data = await res.json();
+
+                if (data.error) {
+                    document.getElementById('statusBar').innerHTML =
+                        `<div class="status error">Hata: ${data.error}</div>`;
+                } else {
+                    const conf = data.confidence || 0;
+                    const confClass = conf >= 0.6 ? 'high' : conf >= 0.3 ? 'medium' : 'low';
+                    document.getElementById('statusBar').innerHTML =
+                        `<div class="status success">Basarili! Guven skoru: <span class="confidence ${confClass}">${(conf*100).toFixed(0)}%</span></div>`;
+
+                    // Header fields
+                    const tbody = document.querySelector('#headerTable tbody');
+                    tbody.innerHTML = '';
+                    if (data.headerFields) {
+                        Object.entries(data.headerFields).forEach(([key, val]) => {
+                            if (val !== null && val !== undefined) {
+                                const tr = document.createElement('tr');
+                                const label = fieldLabels[key] || key;
+                                tr.innerHTML = `<td>${label}</td><td>${val}</td>`;
+                                tbody.appendChild(tr);
+                            }
+                        });
+                    }
+
+                    // Line items
+                    const itemsBody = document.getElementById('itemsBody');
+                    const itemsHeader = document.getElementById('itemsHeader');
+                    itemsBody.innerHTML = '';
+                    itemsHeader.innerHTML = '';
+                    if (data.lineItems && data.lineItems.length > 0) {
+                        document.getElementById('noItems').style.display = 'none';
+                        const keys = Object.keys(data.lineItems[0]);
+                        keys.forEach(k => { itemsHeader.innerHTML += `<th>${fieldLabels[k]||k}</th>`; });
+                        data.lineItems.forEach(item => {
+                            const tr = document.createElement('tr');
+                            keys.forEach(k => { tr.innerHTML += `<td>${item[k] ?? '-'}</td>`; });
+                            itemsBody.appendChild(tr);
+                        });
+                    } else {
+                        document.getElementById('noItems').style.display = 'block';
+                    }
+
+                    // JSON
+                    const jsonCopy = {...data};
+                    delete jsonCopy.rawText;
+                    document.getElementById('jsonOutput').textContent = JSON.stringify(jsonCopy, null, 2);
+
+                    // Raw text
+                    document.getElementById('rawTextOutput').textContent = data.rawText || 'Metin cikarilamadi.';
+                }
+
+                document.getElementById('resultSection').classList.add('visible');
+            } catch (err) {
+                document.getElementById('statusBar').innerHTML =
+                    `<div class="status error">Baglanti hatasi: ${err.message}</div>`;
+                document.getElementById('resultSection').classList.add('visible');
+            } finally {
+                extractBtn.disabled = false;
+                spinner.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>

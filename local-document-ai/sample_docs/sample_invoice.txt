@@ -1,0 +1,43 @@
+ABC Ticaret A.Ş.
+İstanbul Ticaret Sicil No: 123456
+Vergi Dairesi: Beşiktaş
+Vergi Kimlik No: 1234567890
+Adres: Levent Mah. Büyükdere Cad. No:123 Beşiktaş/İstanbul
+
+============================================================
+                        E-FATURA
+============================================================
+
+Fatura No: FTR-2024-001234
+Fatura Seri: ABC
+Düzenleme Tarihi: 15.03.2024
+Vade Tarihi: 15.04.2024
+
+------------------------------------------------------------
+Müşteri Bilgileri:
+Müşteri: XYZ Teknoloji Ltd. Şti.
+Vergi Kimlik No: 0987654321
+Vergi Dairesi: Kadıköy
+Adres: Bağdat Cad. No:456 Kadıköy/İstanbul
+------------------------------------------------------------
+
+Sıra  Açıklama                 Miktar  Birim Fiyat    Tutar
+------------------------------------------------------------
+1     HP ProBook 450 G10       5       15.000,00      75.000,00
+2     Logitech MX Master 3     10      250,00         2.500,00
+3     Mekanik Klavye RGB       10      500,00         5.000,00
+4     USB-C Hub 7-Port         15      350,00         5.250,00
+5     Monitor Standı           5       180,00         900,00
+------------------------------------------------------------
+
+Mal Hizmet Toplamı:                              88.650,00
+KDV Oranı: %20
+KDV Tutarı:                                      17.730,00
+------------------------------------------------------------
+Genel Toplam:                                   106.380,00 TL
+============================================================
+
+Ödeme Bilgileri:
+Banka: Garanti BBVA
+IBAN: TR33 0006 1005 1978 6457 8413 26
+Açıklama: FTR-2024-001234 fatura ödemesi
