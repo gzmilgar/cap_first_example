@@ -12,6 +12,9 @@ from extractors.invoice_extractor import InvoiceExtractor
 from extractors.purchase_order_extractor import PurchaseOrderExtractor
 from extractors.payment_advice_extractor import PaymentAdviceExtractor
 from extractors.base_extractor import BaseDocumentExtractor
+from extractors.schema_manager import SchemaManager
+from extractors.template_manager import TemplateManager
+from extractors.dynamic_extractor import DynamicExtractor
 
 
 SAMPLE_INVOICE_TR = """
@@ -178,6 +181,150 @@ class TestPaymentAdviceExtractor(unittest.TestCase):
         self.assertEqual(header["currency"], "TRY")
         self.assertAlmostEqual(header["totalAmount"], 99000.0)
         self.assertEqual(header["paymentMethod"], "Havale/EFT")
+
+
+class TestSchemaManager(unittest.TestCase):
+
+    def setUp(self):
+        import tempfile
+        self.tmpdir = tempfile.mkdtemp()
+        self.manager = SchemaManager(schemas_dir=self.tmpdir)
+
+    def test_default_schemas_created(self):
+        schemas = self.manager.list_schemas()
+        self.assertTrue(len(schemas) >= 3)
+        ids = [s["id"] for s in schemas]
+        self.assertIn("invoice_default", ids)
+        self.assertIn("purchase_order_default", ids)
+        self.assertIn("payment_advice_default", ids)
+
+    def test_create_custom_schema(self):
+        schema = self.manager.create_schema({
+            "name": "Test Schema",
+            "documentType": "test",
+            "headerFields": [
+                {"name": "field1", "label": "Field 1", "type": "string", "required": True}
+            ],
+            "lineItemFields": [],
+        })
+        self.assertEqual(schema["name"], "Test Schema")
+        self.assertFalse(schema["builtIn"])
+
+        fetched = self.manager.get_schema(schema["id"])
+        self.assertEqual(fetched["name"], "Test Schema")
+
+    def test_delete_custom_schema(self):
+        schema = self.manager.create_schema({"name": "To Delete", "headerFields": []})
+        self.assertTrue(self.manager.delete_schema(schema["id"]))
+        self.assertIsNone(self.manager.get_schema(schema["id"]))
+
+    def test_cannot_delete_builtin(self):
+        with self.assertRaises(ValueError):
+            self.manager.delete_schema("invoice_default")
+
+    def test_duplicate_schema(self):
+        dup = self.manager.duplicate_schema("invoice_default", "My Invoice Copy")
+        self.assertIsNotNone(dup)
+        self.assertEqual(dup["name"], "My Invoice Copy")
+        self.assertFalse(dup["builtIn"])
+        self.assertNotEqual(dup["id"], "invoice_default")
+
+
+class TestTemplateManager(unittest.TestCase):
+
+    def setUp(self):
+        import tempfile
+        self.tmpdir = tempfile.mkdtemp()
+        self.manager = TemplateManager(templates_dir=self.tmpdir)
+
+    def test_default_templates_created(self):
+        templates = self.manager.list_templates()
+        self.assertTrue(len(templates) >= 3)
+
+    def test_filter_by_schema(self):
+        templates = self.manager.list_templates(schema_id="invoice_default")
+        self.assertTrue(all(t["schemaId"] == "invoice_default" for t in templates))
+
+    def test_create_custom_template(self):
+        tmpl = self.manager.create_template({
+            "name": "Test Template",
+            "schemaId": "invoice_default",
+            "headerRules": {
+                "invoiceNumber": {
+                    "method": "regex",
+                    "patterns": ["No:\\s*(\\w+)"],
+                    "postProcess": "trim"
+                }
+            },
+        })
+        self.assertEqual(tmpl["name"], "Test Template")
+        self.assertFalse(tmpl["builtIn"])
+
+
+class TestDynamicExtractor(unittest.TestCase):
+
+    def setUp(self):
+        import tempfile
+        self.schema_dir = tempfile.mkdtemp()
+        self.template_dir = tempfile.mkdtemp()
+        self.schema_mgr = SchemaManager(schemas_dir=self.schema_dir)
+        self.template_mgr = TemplateManager(templates_dir=self.template_dir)
+        self.extractor = DynamicExtractor(self.schema_mgr, self.template_mgr)
+
+    def test_invoice_extraction_with_default_schema_template(self):
+        result = self.extractor.extract(
+            SAMPLE_INVOICE_TR,
+            schema_id="invoice_default",
+            template_id="invoice_tr_standard"
+        )
+        self.assertEqual(result["status"], "DONE")
+        self.assertEqual(result["headerFields"]["invoiceNumber"], "FTR-2024-001234")
+        self.assertAlmostEqual(result["headerFields"]["totalAmount"], 99000.0)
+        self.assertEqual(result["headerFields"]["currency"], "TRY")
+        self.assertGreater(result["confidence"], 0.3)
+
+    def test_po_extraction_with_default_schema_template(self):
+        result = self.extractor.extract(
+            SAMPLE_PO,
+            schema_id="purchase_order_default",
+            template_id="po_tr_standard"
+        )
+        self.assertEqual(result["headerFields"]["poNumber"], "PO-2024-9876")
+        self.assertAlmostEqual(result["headerFields"]["totalAmount"], 45000.0)
+
+    def test_payment_extraction_with_default_schema_template(self):
+        result = self.extractor.extract(
+            SAMPLE_PAYMENT,
+            schema_id="payment_advice_default",
+            template_id="payment_tr_standard"
+        )
+        self.assertEqual(result["headerFields"]["paymentAdviceNumber"], "PAY-2024-111")
+        self.assertEqual(result["headerFields"]["payerName"], "ABC Ticaret A.Ş.")
+
+    def test_auto_detect_template(self):
+        template_id = self.extractor.auto_detect_template(SAMPLE_INVOICE_TR, "invoice_default")
+        self.assertIsNotNone(template_id)
+
+    def test_schema_template_mismatch_raises(self):
+        with self.assertRaises(ValueError):
+            self.extractor.extract(
+                SAMPLE_INVOICE_TR,
+                schema_id="invoice_default",
+                template_id="po_tr_standard"
+            )
+
+    def test_extraction_details(self):
+        result = self.extractor.extract(
+            SAMPLE_INVOICE_TR,
+            schema_id="invoice_default",
+            template_id="invoice_tr_standard"
+        )
+        details = result["extractionDetails"]
+        self.assertIn("totalFields", details)
+        self.assertIn("extractedFields", details)
+        self.assertIn("requiredFields", details)
+        self.assertIn("foundRequired", details)
+        self.assertGreater(details["extractedFields"], 0)
 
 
 if __name__ == '__main__':
