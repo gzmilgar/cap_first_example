@@ -12,6 +12,7 @@ from extractors.text_extractor import TextExtractor
 from extractors.schema_manager import SchemaManager
 from extractors.template_manager import TemplateManager
 from extractors.dynamic_extractor import DynamicExtractor
+from extractors.template_builder import TemplateBuilder
 
 api = Blueprint('api', __name__)
 
@@ -203,6 +204,152 @@ def duplicate_template(template_id):
     if not tmpl:
         return jsonify({"error": "Template not found"}), 404
     return jsonify(tmpl), 201
+
+
+# ============================================================
+#  SMART TEMPLATE BUILDER (no regex needed!)
+# ============================================================
+
+@api.route('/api/v1/templates/from-labels', methods=['POST'])
+def create_template_from_labels():
+    """
+    Create a template by providing labels per field (no regex needed).
+
+    Body JSON:
+    {
+        "name": "Retail Template",
+        "schemaId": "retail",
+        "description": "...",
+        "fieldLabels": {
+            "PurchaseOrderNo": ["Purchase Order No", "PO No", "Siparis No"],
+            "PurchaseOrderDate": ["Purchase Order Date", "Date", "Tarih"],
+            ...
+        }
+    }
+
+    System will auto-generate regex based on labels + field types from schema.
+    """
+    data = request.get_json()
+    if not data or not data.get("name") or not data.get("schemaId"):
+        return jsonify({"error": "name and schemaId are required"}), 400
+
+    schema = schema_manager.get_schema(data["schemaId"])
+    if not schema:
+        return jsonify({"error": f"Schema not found: {data['schemaId']}"}), 400
+
+    field_labels = data.get("fieldLabels", {})
+    if not field_labels:
+        return jsonify({"error": "fieldLabels is required and cannot be empty"}), 400
+
+    template_data = TemplateBuilder.build_template_from_labels(
+        schema, field_labels, data["name"], data.get("description", "")
+    )
+
+    created = template_manager.create_template(template_data)
+    return jsonify(created), 201
+
+
+@api.route('/api/v1/templates/from-sample', methods=['POST'])
+def create_template_from_sample():
+    """
+    Create a template by learning from a sample document.
+
+    Form data:
+    - file: sample document (PDF or image)
+    - schemaId: target schema ID
+    - name: template name
+    - description: (optional)
+    - annotations: JSON string like
+        {"invoiceNumber": "FTR-2024-001234", "totalAmount": "99.000,00"}
+    - lang: OCR language (default eng+tur)
+
+    System will:
+    1. Extract text from sample
+    2. Find each annotation value in text
+    3. Identify the preceding label
+    4. Auto-generate extraction rules
+    """
+    if 'file' not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+
+    file = request.files['file']
+    if not file.filename or not _allowed_file(file.filename):
+        return jsonify({"error": "Invalid or unsupported file"}), 400
+
+    schema_id = request.form.get('schemaId')
+    name = request.form.get('name')
+    description = request.form.get('description', '')
+    annotations_raw = request.form.get('annotations', '{}')
+    lang = request.form.get('lang', 'eng+tur')
+
+    if not schema_id or not name:
+        return jsonify({"error": "schemaId and name are required"}), 400
+
+    schema = schema_manager.get_schema(schema_id)
+    if not schema:
+        return jsonify({"error": f"Schema not found: {schema_id}"}), 400
+
+    try:
+        annotations = json.loads(annotations_raw)
+    except json.JSONDecodeError:
+        return jsonify({"error": "Invalid annotations JSON"}), 400
+
+    if not annotations:
+        return jsonify({"error": "annotations is required"}), 400
+
+    try:
+        file_bytes = file.read()
+        extraction = TextExtractor.extract_from_bytes(file_bytes, file.filename, lang=lang)
+        sample_text = extraction["text"]
+
+        template_data = TemplateBuilder.learn_from_sample(
+            schema, sample_text, annotations, name, description
+        )
+
+        created = template_manager.create_template(template_data)
+        return jsonify({
+            "template": created,
+            "sampleText": sample_text,
+            "learnedLabels": {
+                fname: rule.get("patterns", [])
+                for fname, rule in created.get("headerRules", {}).items()
+            }
+        }), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route('/api/v1/templates/suggest-from-text', methods=['POST'])
+def suggest_from_text():
+    """
+    Analyze document text and suggest label->value pairs.
+    Useful for showing the user what fields could be extracted.
+
+    Form data:
+    - file: document file
+    - lang: OCR language
+    """
+    if 'file' not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+
+    file = request.files['file']
+    if not file.filename or not _allowed_file(file.filename):
+        return jsonify({"error": "Invalid file"}), 400
+
+    lang = request.form.get('lang', 'eng+tur')
+
+    try:
+        file_bytes = file.read()
+        extraction = TextExtractor.extract_from_bytes(file_bytes, file.filename, lang=lang)
+        text = extraction["text"]
+        suggestions = TemplateBuilder.suggest_labels_from_text(text)
+        return jsonify({
+            "text": text,
+            "suggestions": suggestions,
+            "fileName": file.filename,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ============================================================

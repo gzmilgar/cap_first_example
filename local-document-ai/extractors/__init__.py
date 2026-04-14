@@ -5,3 +5,4 @@ from .payment_advice_extractor import PaymentAdviceExtractor
 from .schema_manager import SchemaManager
 from .template_manager import TemplateManager
 from .dynamic_extractor import DynamicExtractor
+from .template_builder import TemplateBuilder

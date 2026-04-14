@@ -179,7 +179,10 @@
             <div class="card">
                 <h2>
                     Templateler (Cikarma Kurallari)
-                    <button class="btn btn-sm" onclick="openTemplateModal()">+ Yeni Template</button>
+                    <span>
+                        <button class="btn btn-sm btn-success" onclick="openSmartModal()">✨ Akilli Template</button>
+                        <button class="btn btn-sm" onclick="openTemplateModal()">+ Yeni Template (Manuel)</button>
+                    </span>
                 </h2>
                 <p style="font-size:13px; color:#666; margin-bottom:16px;">
                     Template, schemadaki her alanin belgeden NASIL cikarilacagini tanimlar.
@@ -224,6 +227,74 @@
                     <button type="submit" class="btn">Kaydet</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- ==================== SMART TEMPLATE MODAL ==================== -->
+    <div class="modal-overlay" id="smartModal">
+        <div class="modal" style="max-width: 900px;">
+            <h2>Akilli Template Olusturucu</h2>
+            <p style="font-size:13px; color:#666; margin-bottom:14px;">
+                Regex yazmana gerek yok! Iki secenegin var:
+            </p>
+
+            <div class="tabs" style="margin-bottom:14px;">
+                <div class="tab active" data-stab="labels" onclick="switchSmartTab('labels')">1. Etiket Bazli</div>
+                <div class="tab" data-stab="sample" onclick="switchSmartTab('sample')">2. Ornek Belgeden Ogren</div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Template Adi</label>
+                    <input type="text" id="smartName" placeholder="Ornek: Retail Standart" required>
+                </div>
+                <div class="form-group">
+                    <label>Bagli Schema</label>
+                    <select id="smartSchemaId" onchange="renderSmartFields()"></select>
+                </div>
+            </div>
+
+            <!-- Etiket Bazli -->
+            <div id="smart-tab-labels">
+                <p style="font-size:12px; color:#666; margin-bottom:10px;">
+                    Her alan icin belge icinde gecen etiket metinlerini yaz. Regex otomatik uretilir.
+                    Birden fazla etiket icin virgulle ayir.
+                </p>
+                <div id="smartLabelsContainer"></div>
+            </div>
+
+            <!-- Ornek Belgeden -->
+            <div id="smart-tab-sample" style="display:none;">
+                <p style="font-size:12px; color:#666; margin-bottom:10px;">
+                    Ornek bir belge yukle. Cikan metinden her alan icin ornek deger yaz veya metinden secim yap.
+                    Sistem etiket metinlerini otomatik bulur.
+                </p>
+
+                <div class="form-group">
+                    <div class="drop-zone" id="sampleDropZone" style="padding:20px;">
+                        <p style="font-size:20px;">&#128196;</p>
+                        <p>Ornek PDF/gorsel yukle</p>
+                        <input type="file" id="sampleFileInput" accept=".pdf,.png,.jpg,.jpeg,.tiff,.bmp" style="display:none;">
+                    </div>
+                    <p id="sampleFileName" style="font-size:12px; color:#666; margin-top:6px;"></p>
+                </div>
+
+                <div id="sampleTextSection" style="display:none;">
+                    <h4 style="font-size:13px; margin:12px 0 6px;">Ornek Belge Metni</h4>
+                    <pre id="sampleText" style="background:#f8f9fa; padding:10px; border-radius:4px; font-size:11px; max-height:200px; overflow:auto; white-space:pre-wrap;"></pre>
+
+                    <h4 style="font-size:13px; margin:16px 0 6px;">Her Alan Icin Ornek Deger</h4>
+                    <p style="font-size:11px; color:#666; margin-bottom:8px;">
+                        Metinde gecen ornek degerleri her alana yaz. Sistem o degerin onundeki etiketi bulup regex olusturur.
+                    </p>
+                    <div id="smartSampleContainer"></div>
+                </div>
+            </div>
+
+            <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:20px;">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('smartModal')">Iptal</button>
+                <button type="button" class="btn btn-success" onclick="saveSmartTemplate()">Template Olustur</button>
+            </div>
         </div>
     </div>
 
@@ -699,6 +770,175 @@
             document.getElementById('spinner').style.display = 'none';
         }
     });
+
+    // ==================== SMART TEMPLATE ====================
+    let smartSampleText = '';
+    let smartSampleFile = null;
+    let smartMode = 'labels';
+    let smartCurrentSchema = null;
+
+    async function openSmartModal() {
+        if (!allSchemas.length) {
+            const res = await fetch('/api/v1/schemas');
+            const data = await res.json();
+            allSchemas = data.schemas;
+        }
+
+        const sel = document.getElementById('smartSchemaId');
+        sel.innerHTML = allSchemas.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+        document.getElementById('smartName').value = '';
+        document.getElementById('smartModal').classList.add('visible');
+        smartSampleText = '';
+        smartSampleFile = null;
+        document.getElementById('sampleFileName').textContent = '';
+        document.getElementById('sampleTextSection').style.display = 'none';
+        switchSmartTab('labels');
+        await renderSmartFields();
+    }
+
+    function switchSmartTab(tab) {
+        smartMode = tab;
+        document.querySelectorAll('[data-stab]').forEach(t => t.classList.remove('active'));
+        document.querySelector(`[data-stab="${tab}"]`).classList.add('active');
+        document.getElementById('smart-tab-labels').style.display = tab === 'labels' ? 'block' : 'none';
+        document.getElementById('smart-tab-sample').style.display = tab === 'sample' ? 'block' : 'none';
+    }
+
+    async function renderSmartFields() {
+        const schemaId = document.getElementById('smartSchemaId').value;
+        if (!schemaId) return;
+        const res = await fetch('/api/v1/schemas/' + schemaId);
+        smartCurrentSchema = await res.json();
+
+        const labelsContainer = document.getElementById('smartLabelsContainer');
+        labelsContainer.innerHTML = '';
+        (smartCurrentSchema.headerFields || []).forEach(field => {
+            const div = document.createElement('div');
+            div.className = 'field-editor';
+            div.innerHTML = `
+                <div class="field-row">
+                    <div style="flex:2;">
+                        <strong style="font-size:12px;">${field.label || field.name}</strong>
+                        <div style="font-size:10px; color:#888;">${field.name} (${field.type})</div>
+                    </div>
+                    <input type="text" placeholder="Etiketler (virgulle ayir): Fatura No, Invoice No"
+                           class="smart-labels" data-field="${field.name}" data-type="${field.type}"
+                           style="flex:3;">
+                </div>`;
+            labelsContainer.appendChild(div);
+        });
+
+        const sampleContainer = document.getElementById('smartSampleContainer');
+        sampleContainer.innerHTML = '';
+        (smartCurrentSchema.headerFields || []).forEach(field => {
+            const div = document.createElement('div');
+            div.className = 'field-editor';
+            div.innerHTML = `
+                <div class="field-row">
+                    <div style="flex:2;">
+                        <strong style="font-size:12px;">${field.label || field.name}</strong>
+                        <div style="font-size:10px; color:#888;">${field.name} (${field.type})</div>
+                    </div>
+                    <input type="text" placeholder="Belgedeki ornek deger: FTR-2024-001234"
+                           class="smart-sample" data-field="${field.name}"
+                           style="flex:3;">
+                </div>`;
+            sampleContainer.appendChild(div);
+        });
+    }
+
+    const sampleDropZone = document.getElementById('sampleDropZone');
+    const sampleFileInput = document.getElementById('sampleFileInput');
+    sampleDropZone.addEventListener('click', () => sampleFileInput.click());
+    sampleDropZone.addEventListener('dragover', e => { e.preventDefault(); sampleDropZone.classList.add('dragover'); });
+    sampleDropZone.addEventListener('dragleave', () => sampleDropZone.classList.remove('dragover'));
+    sampleDropZone.addEventListener('drop', e => {
+        e.preventDefault(); sampleDropZone.classList.remove('dragover');
+        if (e.dataTransfer.files.length) handleSampleFile(e.dataTransfer.files[0]);
+    });
+    sampleFileInput.addEventListener('change', e => { if (e.target.files.length) handleSampleFile(e.target.files[0]); });
+
+    async function handleSampleFile(file) {
+        smartSampleFile = file;
+        document.getElementById('sampleFileName').textContent = `Secilen: ${file.name}`;
+
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await fetch('/api/v1/document/text', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.error) { alert('Metin cikarilamadi: ' + data.error); return; }
+        smartSampleText = data.text;
+        document.getElementById('sampleText').textContent = smartSampleText.substring(0, 2000);
+        document.getElementById('sampleTextSection').style.display = 'block';
+    }
+
+    async function saveSmartTemplate() {
+        const name = document.getElementById('smartName').value.trim();
+        const schemaId = document.getElementById('smartSchemaId').value;
+
+        if (!name) { alert('Template adi gerekli'); return; }
+        if (!schemaId) { alert('Schema secilmeli'); return; }
+
+        if (smartMode === 'labels') {
+            const fieldLabels = {};
+            document.querySelectorAll('.smart-labels').forEach(input => {
+                const field = input.dataset.field;
+                const labels = input.value.split(',').map(s => s.trim()).filter(s => s);
+                if (labels.length > 0) fieldLabels[field] = labels;
+            });
+
+            if (Object.keys(fieldLabels).length === 0) {
+                alert('En az bir alana etiket eklemelisin'); return;
+            }
+
+            const res = await fetch('/api/v1/templates/from-labels', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ name, schemaId, fieldLabels })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                alert('Template olusturuldu! ' + Object.keys(fieldLabels).length + ' alan icin kural tanimlandi.');
+                closeModal('smartModal');
+                loadTemplates();
+            } else {
+                alert('Hata: ' + (data.error || 'Bilinmeyen hata'));
+            }
+        } else {
+            if (!smartSampleFile) { alert('Once ornek belge yuklemelisin'); return; }
+
+            const annotations = {};
+            document.querySelectorAll('.smart-sample').forEach(input => {
+                const field = input.dataset.field;
+                const val = input.value.trim();
+                if (val) annotations[field] = val;
+            });
+
+            if (Object.keys(annotations).length === 0) {
+                alert('En az bir alana ornek deger girmelisin'); return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', smartSampleFile);
+            formData.append('schemaId', schemaId);
+            formData.append('name', name);
+            formData.append('annotations', JSON.stringify(annotations));
+
+            const res = await fetch('/api/v1/templates/from-sample', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await res.json();
+            if (res.ok) {
+                const learnedCount = Object.keys(data.learnedLabels || {}).length;
+                alert(`Template olusturuldu! ${learnedCount} alan icin kural ogrenildi.`);
+                closeModal('smartModal');
+                loadTemplates();
+            } else {
+                alert('Hata: ' + (data.error || 'Bilinmeyen hata'));
+            }
+        }
+    }
 
     // Init
     loadSchemaSelects();

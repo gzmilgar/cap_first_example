@@ -15,6 +15,7 @@ from extractors.base_extractor import BaseDocumentExtractor
 from extractors.schema_manager import SchemaManager
 from extractors.template_manager import TemplateManager
 from extractors.dynamic_extractor import DynamicExtractor
+from extractors.template_builder import TemplateBuilder
 
 
 SAMPLE_INVOICE_TR = """
@@ -325,6 +326,80 @@ class TestDynamicExtractor(unittest.TestCase):
         self.assertIn("requiredFields", details)
         self.assertIn("foundRequired", details)
         self.assertGreater(details["extractedFields"], 0)
+
+
+class TestTemplateBuilder(unittest.TestCase):
+
+    def test_escape_label(self):
+        result = TemplateBuilder.escape_label("Purchase Order No")
+        self.assertIn("Purchase", result)
+        self.assertIn("\\s*", result)
+
+    def test_build_regex_from_labels(self):
+        pattern = TemplateBuilder.build_regex_from_labels(
+            ["Fatura No", "Invoice No"], "string"
+        )
+        self.assertIsNotNone(pattern)
+        import re
+        m = re.search(pattern, "Fatura No: ABC-123", re.IGNORECASE)
+        self.assertIsNotNone(m)
+        self.assertEqual(m.group(1).strip(), "ABC-123")
+
+    def test_build_rule_from_labels(self):
+        rule = TemplateBuilder.build_rule_from_labels(["Tarih"], "date")
+        self.assertEqual(rule["method"], "regex")
+        self.assertEqual(rule["postProcess"], "parseDate")
+        self.assertTrue(len(rule["patterns"]) > 0)
+
+    def test_build_template_from_labels(self):
+        schema = {
+            "id": "test_schema",
+            "name": "Test",
+            "headerFields": [
+                {"name": "invoiceNumber", "label": "Fatura No", "type": "string"},
+                {"name": "totalAmount", "label": "Toplam", "type": "number"},
+            ],
+            "lineItemFields": [
+                {"name": "description", "label": "Aciklama", "type": "string"},
+            ]
+        }
+        template = TemplateBuilder.build_template_from_labels(
+            schema,
+            {"invoiceNumber": ["Fatura No", "Invoice No"], "totalAmount": ["Toplam", "Total"]},
+            "Test Template"
+        )
+        self.assertEqual(template["name"], "Test Template")
+        self.assertEqual(template["schemaId"], "test_schema")
+        self.assertIn("invoiceNumber", template["headerRules"])
+        self.assertIn("totalAmount", template["headerRules"])
+
+    def test_learn_from_sample(self):
+        schema = {
+            "id": "inv",
+            "name": "Invoice",
+            "headerFields": [
+                {"name": "invoiceNumber", "label": "Fatura No", "type": "string"},
+            ],
+            "lineItemFields": []
+        }
+        sample_text = "Fatura No: FTR-2024-001234\nTarih: 15.03.2024"
+        annotations = {"invoiceNumber": "FTR-2024-001234"}
+        template = TemplateBuilder.learn_from_sample(
+            schema, sample_text, annotations, "Learned"
+        )
+        self.assertEqual(template["name"], "Learned")
+        self.assertIn("invoiceNumber", template["headerRules"])
+        # Verify the learned pattern actually works
+        from extractors.dynamic_extractor import DynamicExtractor
+        import re
+        pattern = template["headerRules"]["invoiceNumber"]["patterns"][0]
+        match = re.search(pattern, sample_text, re.IGNORECASE)
+        self.assertIsNotNone(match)
+
+    def test_suggest_labels_from_text(self):
+        text = "Fatura No: ABC-123\nTarih: 01.02.2024\nMusteri: Test Ltd."
+        suggestions = TemplateBuilder.suggest_labels_from_text(text)
+        self.assertTrue(len(suggestions) > 0)
 
 
 if __name__ == '__main__':
