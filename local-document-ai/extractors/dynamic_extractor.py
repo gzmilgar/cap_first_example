@@ -197,9 +197,98 @@ class DynamicExtractor(BaseDocumentExtractor):
         if method == "table" and tables:
             items = self._extract_items_from_tables(tables, line_item_rules, schema_fields)
 
-        # Fallback to regex if no table items found
+        # Fallback 1: regex pattern defined in template
         if not items and line_item_rules.get("regexPattern"):
             items = self._extract_items_by_regex(text, line_item_rules, schema_fields)
+
+        # Fallback 2: text-based column detection (for OCR/image documents)
+        # Finds header line with column keywords, then parses following rows by position.
+        if not items and line_item_rules.get("tableKeywords"):
+            items = self._extract_items_from_text(text, line_item_rules, schema_fields)
+
+        return items
+
+    def _extract_items_from_text(self, text: str, rules: dict, schema_fields: list) -> list:
+        """
+        Extract line items from plain text (no table structure).
+
+        Strategy:
+        1. Find the header row by matching table keywords against each line
+        2. Determine column boundaries from the header line's word positions
+        3. For each subsequent line, split by column boundaries until a terminator
+           (empty line or a known end-keyword like "Toplam", "Total").
+        """
+        items = []
+        table_keywords = rules.get("tableKeywords", {})
+        if not table_keywords:
+            return items
+
+        lines = text.split('\n')
+        header_idx = -1
+        col_positions = []
+        col_fields = []
+
+        # End-of-table markers
+        end_markers = ["toplam", "total", "ara toplam", "subtotal", "kdv", "tax",
+                       "genel toplam", "grand total"]
+
+        # Find header line: one that contains keywords from >=2 different fields
+        for i, line in enumerate(lines):
+            lower = line.lower()
+            matched_fields = []
+            for field_name, kws in table_keywords.items():
+                for kw in kws:
+                    if kw and kw in lower:
+                        pos = lower.find(kw)
+                        matched_fields.append((field_name, pos, kw))
+                        break
+            if len(matched_fields) >= 2:
+                header_idx = i
+                # Sort by position
+                matched_fields.sort(key=lambda x: x[1])
+                col_positions = [m[1] for m in matched_fields]
+                col_fields = [m[0] for m in matched_fields]
+                break
+
+        if header_idx < 0:
+            return items
+
+        # Parse rows below header
+        for line in lines[header_idx + 1:]:
+            stripped = line.strip()
+            if not stripped:
+                # Empty line ends the table only if we already found items
+                if items:
+                    break
+                continue
+
+            # Stop at end markers (but only if no real line items before OR followed by value)
+            low = stripped.lower()
+            if any(low.startswith(m) for m in end_markers):
+                break
+
+            # Split line into segments based on column positions
+            item = {}
+            for idx, field_name in enumerate(col_fields):
+                start = col_positions[idx]
+                end = col_positions[idx + 1] if idx + 1 < len(col_positions) else len(line)
+                segment = line[start:end].strip()
+                if not segment:
+                    continue
+
+                field_type = "string"
+                for sf in schema_fields:
+                    if sf["name"] == field_name:
+                        field_type = sf.get("type", "string")
+                        break
+
+                if field_type == "number":
+                    item[field_name] = self.parse_amount(segment)
+                else:
+                    item[field_name] = segment
+
+            if any(v for v in item.values()):
+                items.append(item)
 
         return items
 
