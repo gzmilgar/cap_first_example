@@ -103,7 +103,8 @@ class TemplateBuilder:
 
     @classmethod
     def build_template_from_labels(cls, schema: dict, field_labels: dict,
-                                    template_name: str, description: str = "") -> dict:
+                                    template_name: str, description: str = "",
+                                    line_item_labels: dict = None) -> dict:
         """
         Build a complete template from field->labels mapping.
 
@@ -116,6 +117,8 @@ class TemplateBuilder:
             }
             template_name: Name for the new template
             description: Optional description
+            line_item_labels: Optional {field_name: [column_headers]} for line items.
+                e.g. {"description": ["Aciklama", "Description", "Urun"]}
 
         Returns:
             Complete template dict ready to save
@@ -150,25 +153,33 @@ class TemplateBuilder:
                 if rule:
                     header_rules[field_name] = rule
 
-        # Auto-generate line item table keywords from schema field labels
+        # Line item table keywords: user-provided labels override schema defaults
+        line_item_labels = line_item_labels or {}
         table_keywords = {}
         for field in schema.get("lineItemFields", []):
             field_name = field["name"]
-            keywords = [field.get("label", "").lower(), field_name.lower()]
-            # Add common synonyms
-            synonyms_map = {
-                "description": ["description", "aciklama", "açıklama", "ürün"],
-                "quantity": ["quantity", "miktar", "adet", "qty"],
-                "unitPrice": ["unit price", "birim fiyat", "fiyat"],
-                "amount": ["amount", "tutar", "toplam"],
-                "unit": ["unit", "birim", "uom"],
-                "materialNumber": ["material", "malzeme", "part no"],
-            }
-            for key, syns in synonyms_map.items():
-                if field_name.lower() == key.lower() or any(s in field_name.lower() for s in syns):
-                    keywords.extend(syns)
-                    break
-            keywords = list(set(k for k in keywords if k))
+
+            # 1) user-provided labels take priority
+            user_labels = line_item_labels.get(field_name, [])
+            if user_labels:
+                keywords = [lbl.lower().strip() for lbl in user_labels if lbl.strip()]
+            else:
+                # 2) fallback: schema label + name + synonyms
+                keywords = [field.get("label", "").lower(), field_name.lower()]
+                synonyms_map = {
+                    "description": ["description", "aciklama", "açıklama", "ürün"],
+                    "quantity": ["quantity", "miktar", "adet", "qty"],
+                    "unitPrice": ["unit price", "birim fiyat", "fiyat"],
+                    "amount": ["amount", "tutar", "toplam"],
+                    "unit": ["unit", "birim", "uom"],
+                    "materialNumber": ["material", "malzeme", "part no"],
+                }
+                for key, syns in synonyms_map.items():
+                    if field_name.lower() == key.lower() or any(s in field_name.lower() for s in syns):
+                        keywords.extend(syns)
+                        break
+
+            keywords = list(dict.fromkeys(k for k in keywords if k))
             if keywords:
                 table_keywords[field_name] = keywords
 
@@ -187,7 +198,8 @@ class TemplateBuilder:
     @classmethod
     def learn_from_sample(cls, schema: dict, sample_text: str,
                           annotations: dict, template_name: str,
-                          description: str = "") -> dict:
+                          description: str = "",
+                          line_item_annotations: dict = None) -> dict:
         """
         Learn extraction rules from a sample document.
 
@@ -201,6 +213,8 @@ class TemplateBuilder:
                 Example: {"invoiceNumber": "FTR-2024-001234"}
             template_name: Name for new template
             description: Optional description
+            line_item_annotations: Optional {field_name: "column header text"}
+                e.g. {"description": "Aciklama", "quantity": "Miktar"}
 
         Returns:
             Complete template dict with auto-generated rules
@@ -218,8 +232,17 @@ class TemplateBuilder:
             if labels:
                 field_labels[field_name] = labels
 
+        # Convert line item annotations (single column header per field) to list form
+        line_item_labels = None
+        if line_item_annotations:
+            line_item_labels = {}
+            for field_name, header in line_item_annotations.items():
+                if header and header.strip():
+                    line_item_labels[field_name] = [header.strip()]
+
         return cls.build_template_from_labels(
-            schema, field_labels, template_name, description
+            schema, field_labels, template_name, description,
+            line_item_labels=line_item_labels
         )
 
     @staticmethod

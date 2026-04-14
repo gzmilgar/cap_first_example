@@ -260,7 +260,17 @@
                     Her alan icin belge icinde gecen etiket metinlerini yaz. Regex otomatik uretilir.
                     Birden fazla etiket icin virgulle ayir.
                 </p>
+                <h4 style="font-size:13px; margin:8px 0;">Header Alanlari</h4>
                 <div id="smartLabelsContainer"></div>
+
+                <div id="smartLineItemsSection" style="display:none; margin-top:16px;">
+                    <h4 style="font-size:13px; margin:8px 0;">Kalem (Line Item) Sutunlari</h4>
+                    <p style="font-size:11px; color:#666; margin-bottom:8px;">
+                        Belgede kalem tablosunun sutun basliklarini yaz (virgulle ayir).
+                        Ornek: "Aciklama, Urun, Description"
+                    </p>
+                    <div id="smartLineItemsContainer"></div>
+                </div>
             </div>
 
             <!-- Ornek Belgeden -->
@@ -283,11 +293,19 @@
                     <h4 style="font-size:13px; margin:12px 0 6px;">Ornek Belge Metni</h4>
                     <pre id="sampleText" style="background:#f8f9fa; padding:10px; border-radius:4px; font-size:11px; max-height:200px; overflow:auto; white-space:pre-wrap;"></pre>
 
-                    <h4 style="font-size:13px; margin:16px 0 6px;">Her Alan Icin Ornek Deger</h4>
+                    <h4 style="font-size:13px; margin:16px 0 6px;">Header Alanlari - Ornek Deger</h4>
                     <p style="font-size:11px; color:#666; margin-bottom:8px;">
                         Metinde gecen ornek degerleri her alana yaz. Sistem o degerin onundeki etiketi bulup regex olusturur.
                     </p>
                     <div id="smartSampleContainer"></div>
+
+                    <div id="smartSampleLineItemsSection" style="display:none; margin-top:12px;">
+                        <h4 style="font-size:13px; margin:12px 0 6px;">Kalem (Line Item) Sutun Basliklari</h4>
+                        <p style="font-size:11px; color:#666; margin-bottom:8px;">
+                            Belgedeki tablo sutun basliklarini yaz (ornek: "Aciklama", "Miktar").
+                        </p>
+                        <div id="smartSampleLineItemsContainer"></div>
+                    </div>
                 </div>
             </div>
 
@@ -810,6 +828,7 @@
         const res = await fetch('/api/v1/schemas/' + schemaId);
         smartCurrentSchema = await res.json();
 
+        // ---- Header fields (labels tab) ----
         const labelsContainer = document.getElementById('smartLabelsContainer');
         labelsContainer.innerHTML = '';
         (smartCurrentSchema.headerFields || []).forEach(field => {
@@ -828,6 +847,33 @@
             labelsContainer.appendChild(div);
         });
 
+        // ---- Line item fields (labels tab) ----
+        const lineItemsContainer = document.getElementById('smartLineItemsContainer');
+        const lineItemsSection = document.getElementById('smartLineItemsSection');
+        lineItemsContainer.innerHTML = '';
+        const lineItemFields = smartCurrentSchema.lineItemFields || [];
+        if (lineItemFields.length > 0) {
+            lineItemsSection.style.display = 'block';
+            lineItemFields.forEach(field => {
+                const div = document.createElement('div');
+                div.className = 'field-editor';
+                div.innerHTML = `
+                    <div class="field-row">
+                        <div style="flex:2;">
+                            <strong style="font-size:12px;">${field.label || field.name}</strong>
+                            <div style="font-size:10px; color:#888;">${field.name} (${field.type})</div>
+                        </div>
+                        <input type="text" placeholder="Sutun basliklari (virgulle ayir): Aciklama, Description"
+                               class="smart-lineitem-labels" data-field="${field.name}"
+                               style="flex:3;">
+                    </div>`;
+                lineItemsContainer.appendChild(div);
+            });
+        } else {
+            lineItemsSection.style.display = 'none';
+        }
+
+        // ---- Header fields (sample tab) ----
         const sampleContainer = document.getElementById('smartSampleContainer');
         sampleContainer.innerHTML = '';
         (smartCurrentSchema.headerFields || []).forEach(field => {
@@ -845,6 +891,31 @@
                 </div>`;
             sampleContainer.appendChild(div);
         });
+
+        // ---- Line item fields (sample tab) ----
+        const sampleLineItemsContainer = document.getElementById('smartSampleLineItemsContainer');
+        const sampleLineItemsSection = document.getElementById('smartSampleLineItemsSection');
+        sampleLineItemsContainer.innerHTML = '';
+        if (lineItemFields.length > 0) {
+            sampleLineItemsSection.style.display = 'block';
+            lineItemFields.forEach(field => {
+                const div = document.createElement('div');
+                div.className = 'field-editor';
+                div.innerHTML = `
+                    <div class="field-row">
+                        <div style="flex:2;">
+                            <strong style="font-size:12px;">${field.label || field.name}</strong>
+                            <div style="font-size:10px; color:#888;">${field.name} (${field.type})</div>
+                        </div>
+                        <input type="text" placeholder="Belgedeki sutun basligi: Aciklama"
+                               class="smart-sample-lineitem" data-field="${field.name}"
+                               style="flex:3;">
+                    </div>`;
+                sampleLineItemsContainer.appendChild(div);
+            });
+        } else {
+            sampleLineItemsSection.style.display = 'none';
+        }
     }
 
     const sampleDropZone = document.getElementById('sampleDropZone');
@@ -887,18 +958,26 @@
                 if (labels.length > 0) fieldLabels[field] = labels;
             });
 
-            if (Object.keys(fieldLabels).length === 0) {
-                alert('En az bir alana etiket eklemelisin'); return;
+            const lineItemLabels = {};
+            document.querySelectorAll('.smart-lineitem-labels').forEach(input => {
+                const field = input.dataset.field;
+                const labels = input.value.split(',').map(s => s.trim()).filter(s => s);
+                if (labels.length > 0) lineItemLabels[field] = labels;
+            });
+
+            if (Object.keys(fieldLabels).length === 0 && Object.keys(lineItemLabels).length === 0) {
+                alert('En az bir alana veya kaleme etiket eklemelisin'); return;
             }
 
             const res = await fetch('/api/v1/templates/from-labels', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ name, schemaId, fieldLabels })
+                body: JSON.stringify({ name, schemaId, fieldLabels, lineItemLabels })
             });
             const data = await res.json();
             if (res.ok) {
-                alert('Template olusturuldu! ' + Object.keys(fieldLabels).length + ' alan icin kural tanimlandi.');
+                const total = Object.keys(fieldLabels).length + Object.keys(lineItemLabels).length;
+                alert('Template olusturuldu! ' + total + ' alan/kalem icin kural tanimlandi.');
                 closeModal('smartModal');
                 loadTemplates();
             } else {
@@ -914,7 +993,14 @@
                 if (val) annotations[field] = val;
             });
 
-            if (Object.keys(annotations).length === 0) {
+            const lineItemAnnotations = {};
+            document.querySelectorAll('.smart-sample-lineitem').forEach(input => {
+                const field = input.dataset.field;
+                const val = input.value.trim();
+                if (val) lineItemAnnotations[field] = val;
+            });
+
+            if (Object.keys(annotations).length === 0 && Object.keys(lineItemAnnotations).length === 0) {
                 alert('En az bir alana ornek deger girmelisin'); return;
             }
 
@@ -923,6 +1009,7 @@
             formData.append('schemaId', schemaId);
             formData.append('name', name);
             formData.append('annotations', JSON.stringify(annotations));
+            formData.append('lineItemAnnotations', JSON.stringify(lineItemAnnotations));
 
             const res = await fetch('/api/v1/templates/from-sample', {
                 method: 'POST',

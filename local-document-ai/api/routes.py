@@ -238,11 +238,13 @@ def create_template_from_labels():
         return jsonify({"error": f"Schema not found: {data['schemaId']}"}), 400
 
     field_labels = data.get("fieldLabels", {})
-    if not field_labels:
-        return jsonify({"error": "fieldLabels is required and cannot be empty"}), 400
+    line_item_labels = data.get("lineItemLabels", {}) or None
+    if not field_labels and not line_item_labels:
+        return jsonify({"error": "fieldLabels or lineItemLabels is required"}), 400
 
     template_data = TemplateBuilder.build_template_from_labels(
-        schema, field_labels, data["name"], data.get("description", "")
+        schema, field_labels, data["name"], data.get("description", ""),
+        line_item_labels=line_item_labels
     )
 
     created = template_manager.create_template(template_data)
@@ -280,6 +282,7 @@ def create_template_from_sample():
     name = request.form.get('name')
     description = request.form.get('description', '')
     annotations_raw = request.form.get('annotations', '{}')
+    line_item_annotations_raw = request.form.get('lineItemAnnotations', '{}')
     lang = request.form.get('lang', 'eng+tur')
 
     if not schema_id or not name:
@@ -291,11 +294,12 @@ def create_template_from_sample():
 
     try:
         annotations = json.loads(annotations_raw)
+        line_item_annotations = json.loads(line_item_annotations_raw) if line_item_annotations_raw else {}
     except json.JSONDecodeError:
         return jsonify({"error": "Invalid annotations JSON"}), 400
 
-    if not annotations:
-        return jsonify({"error": "annotations is required"}), 400
+    if not annotations and not line_item_annotations:
+        return jsonify({"error": "annotations or lineItemAnnotations is required"}), 400
 
     try:
         file_bytes = file.read()
@@ -303,7 +307,8 @@ def create_template_from_sample():
         sample_text = extraction["text"]
 
         template_data = TemplateBuilder.learn_from_sample(
-            schema, sample_text, annotations, name, description
+            schema, sample_text, annotations, name, description,
+            line_item_annotations=line_item_annotations or None
         )
 
         created = template_manager.create_template(template_data)
